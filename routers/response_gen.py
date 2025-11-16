@@ -460,6 +460,171 @@ async def add_response_template(
         )
 
 
+@router.post("/api/v1/generate-response", summary="Generate Specialist Response")
+async def generate_specialist_response(request: Dict[str, Any]):
+    """
+    Generate AI-powered response for specialist persona using Mistral model.
+    This endpoint eliminates template responses and uses only AI generation.
+    """
+    import httpx
+    import os
+
+    start_time = time.time()
+
+    try:
+        # Extract parameters from request
+        original_text = request.get("text", "")
+        intent = request.get("intent", "")
+        entities = request.get("entities", [])
+        language = request.get("language", "english")
+        product_info = request.get("product_info", "")
+        product_name = request.get("product_name", "منتج")
+        specialist_name = request.get("specialist_name", "خالد")
+        task = request.get("task", "generate_response")
+
+        if task != "generate_response":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid task specified"
+            )
+
+        # OpenRouter API configuration
+        openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "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")
+
+        # Extract entities for context
+        entity_context = ""
+        if entities:
+            entity_context = "\nالمعلومات المذكورة: " + ", ".join([f"{e.get('text')} ({e.get('type')})" for e in entities[:3]])
+
+        # Advanced prompt for Palestinian specialist persona
+        prompt = f"""أنت {specialist_name}، متخصص خدمة عملاء فلسطيني محترف. شغلك الرد على استفسارات الزبائن عن المنتجات.
+
+**شخصيتك:**
+- اسمك {specialist_name}، متخصص في منتجات عالية الجودة
+- تتحدث باللهجة الفلسطينية الطبيعية (أهلاً، يا هلا، برافو، شغل شايب، لاء لأ، ماشي الله)
+- أسلوبك مهني وبسيط، تستخدم لغة واضحة ومباشرة
+- دائماً ودود ومساعد، تستخدم معلومات المنتج بدقة
+- تستخدم كلمات مثل "عندي" لأنك متخصص لا بائع عادي
+
+**قواعد مهمة:**
+- رد دائماً عن المنتج المذكور في معلومات المنتج
+- استخدم معلومات المنتج المعتمدة بالضبط
+- رد باللهجة الفلسطينية الواضحة والطبيعية
+- كن مهني وبسيط في نفس الوقت
+- لا تخلق معلومات غير موجودة
+- لا ترد كـ "روبوت" - كن طبيعي وإنساني
+
+{product_info}
+
+رسالة الزبون: "{original_text}"
+النية المحتسبة: {intent}{entity_context}
+
+رد كـ {specialist_name} - استخدم اللهجة الفلسطينية المهنية والبسيطة، كن دقيقاً في معلومات المنتج، ورد بشكل طبيعي وودود.
+
+مهم جداً: رد قصير جداً (جملة أو جملتين كحد أقصى)، مباشر، ومختصر. لا تشرح ولا تطيل. فقط أجب عن السؤال مباشرة."""
+
+        # Call Mistral model via OpenRouter
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openrouter_api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://railway.app",
+                    "X-Title": f"{specialist_name} - Palestinian Specialist"
+                },
+                json={
+                    "model": "mistralai/mistral-nemo",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": f"أنت {specialist_name}، متخصص فلسطيني. رد قصير ومباشر باللهجة الفلسطينية. لا تطيل ولا تشرح. فقط أجب مباشرة."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    "temperature": 0.5,
+                    "max_tokens": 80,
+                    "top_p": 0.8,
+                    "frequency_penalty": 0.3,
+                    "presence_penalty": 0.2
+                }
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                ai_response = result["choices"][0]["message"]["content"].strip()
+
+                # Clean up AI patterns
+                ai_response = ai_response.replace(f"كـ {specialist_name}", "").replace(f"أنا {specialist_name}", "")
+                ai_response = ai_response.replace("أود أن أقول", "").replace("Let me think", "")
+                ai_response = ai_response.replace(f"بصفتي {specialist_name}", "")
+                ai_response = ai_response.strip()
+
+                processing_time = time.time() - start_time
+
+                # Log successful AI generation
+                logger.info(
+                    "specialist_response_generated",
+                    specialist=specialist_name,
+                    intent=intent,
+                    language=language,
+                    processing_time=processing_time,
+                    response_length=len(ai_response)
+                )
+
+                return {
+                    "response": ai_response if ai_response else "أهلاً بك! كيف يمكنني أخدمك؟",
+                    "response_type": "ai_generated",
+                    "style": "professional_palestinian",
+                    "confidence": 0.9,
+                    "template_id": None,
+                    "alternatives": [],
+                    "processing_time_ms": processing_time * 1000,
+                    "metadata": {
+                        "specialist": specialist_name,
+                        "model": "mistralai/mistral-nemo",
+                        "language": language,
+                        "intent": intent
+                    }
+                }
+            else:
+                logger.error(
+                    "openrouter_api_error",
+                    status_code=response.status_code,
+                    error_text=response.text
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="AI service temporarily unavailable"
+                )
+
+    except httpx.RequestError as e:
+        logger.error(
+            "http_request_error",
+            error=str(e),
+            processing_time=time.time() - start_time
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service temporarily unavailable"
+        )
+    except Exception as e:
+        processing_time = time.time() - start_time
+        logger.error(
+            "specialist_response_generation_error",
+            error=str(e),
+            processing_time=processing_time,
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Response generation failed"
+        )
+
+
 @router.get("/health", summary="Response Generator Health")
 async def response_generator_health(generator=Depends(get_response_generator)):
     """
