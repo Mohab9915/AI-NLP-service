@@ -19,12 +19,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('vader_lexicon'); nltk.download('wordnet')"
 
 # Copy application code
-COPY requirements.txt .
 COPY railway_main.py main.py
 
 # Copy routers (if they exist)
 RUN mkdir -p routers 2>/dev/null || true
-COPY routers/ ./routers/ 2>/dev/null || true
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash app && \
